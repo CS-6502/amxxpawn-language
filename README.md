@@ -32,7 +32,8 @@ It turns VS Code into a powerful IDE for Pawn, bringing features that were previ
 
 This extension goes far beyond simple syntax highlighting. It offers a complete **Language Server** with:
 
-* **Advanced IntelliSense:** Autocomplete for functions, constants, and variables.
+* **Advanced IntelliSense:** Autocomplete for functions, constants, variables, enum members and etc.
+* **Advanced Coloring:** Use Different Colors for Functions, Variables, Constants, Enums, Enum Members and etc. 
 * **Smart Code Navigation (`Go to Definition`):** Press `Ctrl+Click` to instantly jump to the definition of:
     * Functions (including `public`, `stock`, `native`, and those with an `@` prefix).
     * Constants defined with `#define`.
