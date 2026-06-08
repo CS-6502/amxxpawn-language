@@ -44,6 +44,7 @@ This extension goes far beyond simple syntax highlighting. It offers a complete 
 * **Integrated Compilation:** Compile your plugins directly from VS Code with a single command.
 
 ## 🚀 Installation
+### Online Method :
 
 1. Install [Visual Studio Code](https://code.visualstudio.com/).
 2. Open the **Extensions** tab (`Ctrl+Shift+X`).
@@ -51,7 +52,15 @@ This extension goes far beyond simple syntax highlighting. It offers a complete 
 4. Click **Install**.
 5. Reload VS Code and enjoy!
 
-You can also install it directly from the [Marketplace page](https://marketplace.visualstudio.com/items?itemName=iceeedR.amxx-pawn-language-editor).
+### Offline Method :
+
+1. Install Visual Studio Code.
+2. Download `.vsix` File from this Repository
+3. Open Visual Studio Code.
+4. go to `Extension` Tab.
+5. Click on `...` .
+6. Select `Install from VSIX`.
+7. Browse for Downloaded File, Select it and Enjoy !
 
 ## ⚙️ Configuration (Essential Step!)
 
