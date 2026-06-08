@@ -7,6 +7,47 @@ layout: default
   <a href="/amxxpawn-language/CHANGELOG.html">Histórico de Mudanças</a>
 </p>
 
+## [Version 1.5.1] - 2026-05-24
+### Fixed
+- **Includes Inside Preprocessor Blocks**: Corrigido um bug onde diretivas `#include` indentadas dentro de blocos condicionais não eram reconhecidas, causando perda de auto-complete e highlights nas sub-includes.
+- * **Includes Inside Preprocessor Blocks**: Fixed a bug where indented `#include` directives inside conditional blocks were not recognized, causing sub-includes to lose auto-complete and highlighting.*
+- **Find All References Duplicate Results**: Corrigido o bug onde `Shift+F12` exibia definições em duplicidade e operava como "Go to Definition". Agora exibe apenas as referências de forma deduplicada e consistente.
+- * **Find All References Duplicate Results**: Fixed a bug where `Shift+F12` displayed definitions multiple times and behaved like "Go to Definition". It now only displays occurrences deduplicated consistently.*
+- **Find All References com Símbolos Especiais (@)**: O `Shift+F12` agora reconhece corretamente funções que iniciam com o caractere arroba (ex: `@PlacarHostName`).
+- * **Find All References with Special Symbols (@)**: Fixed a bug where "Find All References" would fail to find occurrences for functions starting with the at sign (@).*
+- **Find All References dentro de Strings (Callbacks)**: Corrigido um bug na busca de referências onde chamadas de funções e callbacks escritas em forma de string (ex: `set_task(4.0, "@ClearResults")`) eram ignoradas e não listadas no "Find All References". O VS Code agora também busca identificadores isolados dentro das strings, como é tradicional no desenvolvimento Pawn.
+- * **Find All References inside Strings (Callbacks)**: Fixed a bug in reference search where function calls and callbacks written as strings (e.g., `set_task(4.0, "@ClearResults")`) were ignored and not listed in "Find All References". VS Code now searches for isolated identifiers inside strings as well, as is traditional in Pawn development.*
+
+## [Version 1.5.0] - 2026-05-08
+### Added
+- **Linux Support**: Adicionado suporte para sistemas Linux.
+- * **Linux Support**: Added support for Linux systems.*
+- **Official Compiler Download URL**: Alterada a URL de download automático do compilador para a URL oficial de releases do AmxModX no GitHub.
+- * **Official Compiler Download URL**: Switch to official AmxModX github release URL for auto compiler download.*
+
+## [Version 1.4.0] - 2026-04-27
+### Added
+- **Local Variable Hover & Definition**: Agora o "Go to Definition" (Ctrl+Click) e o Hover funcionam para variáveis locais e parâmetros dentro do corpo das funções.
+- * **Local Variable Hover & Definition**: Support for "Go to Definition" (Ctrl+Click) and Hover tooltips for local variables and parameters inside function bodies.*
+
+### Fixed
+- **Block Comment Parsing**: Corrigido um bug crítico onde chaves `{}` dentro de comentários em bloco `/* */` quebravam o rastreamento de escopo do parser, impedindo a detecção de variáveis locais em funções subsequentes.
+- * **Block Comment Parsing**: Fixed a critical bug where braces `{}` inside block comments `/* */` would break the parser's scope tracking, causing functions below them to lose local variable detection.*
+- **Robust Comment Stripping**: O parser agora remove corretamente comentários em bloco de linha única (ex: `/* comment */ new x;`) e lida melhor com caracteres escapados em strings ao contar chaves.
+- * **Robust Comment Stripping**: The parser now correctly strips single-line block comments (e.g., `/* comment */ new x;`) and handles escaped characters in strings better when counting braces.*
+- **Go to Definition URI Parity**: Corrigido um bug onde o "Go to Definition" poderia falhar ou retornar nulo se símbolos em arquivos diferentes estivessem na mesma linha.
+- * **Go to Definition URI Parity**: Fixed a bug where "Go to Definition" could fail or return null if symbols in different files shared the same line number.*
+- **Highlighting Priority (new const)**: Resolvido o conflito onde variáveis `new const` eram incorretamente classificadas como membros de enum no realce semântico.
+- * **Highlighting Priority (new const)**: Resolved a conflict where `new const` variables were incorrectly classified as enum members in semantic highlighting.*
+
+## [Version 1.3.2] - 2026-04-27
+
+### Fixed
+- **Single-character Identifiers**: O parser agora identifica corretamente funções e variáveis com apenas uma letra (ex: `new n;`, `public p(){}`).
+- * **Single-character Identifiers**: Fixed the parser to correctly identify functions and variables with only one letter (e.g., `new n;`, `public p(){}`).*
+- **Compound Variable Modifiers**: Corrigido o erro onde variáveis com múltiplos modificadores (ex: `new const TEST_ARR`) não eram corretamente reconhecidas devido ao stripping parcial de palavras-chave.
+- * **Compound Variable Modifiers**: Fixed an error where variables with multiple modifiers (e.g., `new const TEST_ARR`) were not correctly recognized due to partial keyword stripping.*
+
 ## [Version 1.3.1] - 2026-04-25
 ### Fixed
 - **Multi-line Variable Parsing**: Corrigido o parser para identificar corretamente variáveis declaradas em múltiplas linhas (ex: `new a, \n b, \n c;`) ou quando os modificadores estão em uma linha e os identificadores em outra (ex: `public stock const \n PluginName[]`).

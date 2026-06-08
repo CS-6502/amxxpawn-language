@@ -14,8 +14,8 @@ interface FindFunctionIdentifierResult {
     parameterIndex?: number;
 }
 
-const callableDefinitionRegex = /^\s*(?:(forward|native|public|static|stock)\s+)?([A-Za-z_@][\w@:]+)\s*\(([^)]*)\)/;
-const callableStartRegex = /^\s*(?:(?:forward|native|public|static|stock)\s+)?[A-Za-z_@][\w@:]+\s*\(/;
+const callableDefinitionRegex = /^\s*(?:(forward|native|public|static|stock)\s+)?([A-Za-z_@][\w@:]*)\s*\(([^)]*)\)/;
+const callableStartRegex = /^\s*(?:(?:forward|native|public|static|stock)\s+)?[A-Za-z_@][\w@:]*\s*\(/;
 const defineRegex = /^#define\s+([A-Za-z_@][\w@]*)(?:\(([^)]*)\))?\s*(.*)/;
 const globalVarRegex = /^\s*(new|static|const|public|stock)\b/;
 const localVarRegex = /^\s*(?:new|static|const|stock)\b/;
@@ -43,26 +43,55 @@ const pawnKeywords = [
 ];
 
 function stripComments(line: string, keepLength: boolean = false): string {
+    let result = '';
     let inString = false;
     let quote = '';
+    let inBlock = false;
+
     for (let i = 0; i < line.length; i++) {
         const char = line[i];
-        if ((char === '"' || char === "'") && (i === 0 || line[i - 1] !== '\\')) {
-            if (!inString) {
-                inString = true;
-                quote = char;
-            } else if (char === quote) {
+        const nextChar = line[i + 1];
+
+        if (inBlock) {
+            if (char === '*' && nextChar === '/') {
+                inBlock = false;
+                i++; // skip /
+                if (keepLength) result += '  ';
+            } else {
+                if (keepLength) result += ' ';
+            }
+            continue;
+        }
+
+        if (inString) {
+            result += char;
+            if (char === quote && (i === 0 || line[i - 1] !== '\\')) {
                 inString = false;
             }
+            continue;
         }
-        if (char === '/' && line[i + 1] === '/' && !inString) {
-            if (keepLength) {
-                return line.substring(0, i) + ' '.repeat(line.length - i);
-            }
-            return line.substring(0, i).trim();
+
+        if (char === '/' && nextChar === '/') {
+            if (keepLength) result += ' '.repeat(line.length - i);
+            break;
         }
+
+        if (char === '/' && nextChar === '*') {
+            inBlock = true;
+            i++; // skip *
+            if (keepLength) result += '  ';
+            continue;
+        }
+
+        if ((char === '"' || char === "'") && (i === 0 || line[i - 1] !== '\\')) {
+            inString = true;
+            quote = char;
+        }
+
+        result += char;
     }
-    return keepLength ? line : line.trim();
+
+    return keepLength ? result : result.trim();
 }
 
 interface JoinedSignature {
@@ -110,8 +139,8 @@ function positionToIndex(content: string, position: VSCLS.Position): number {
     return index + position.character;
 }
 
-function findIdentifierAtCursor(content: string, cursorIndex: number): { identifier: string; isCallable: boolean } {
-    const result = { identifier: '', isCallable: false };
+function findIdentifierAtCursor(content: string, cursorIndex: number): { identifier: string; isCallable: boolean; isTag: boolean } {
+    const result = { identifier: '', isCallable: false, isTag: false };
     // Handle cursor past end or on non-alphanumeric (e.g. \r at line end)
     if (cursorIndex >= content.length) return result;
     let idx = cursorIndex;
@@ -129,6 +158,9 @@ function findIdentifierAtCursor(content: string, cursorIndex: number): { identif
     while (end < content.length - 1 && StringHelpers.isAlphaNum(content[end + 1])) end++;
     result.identifier = content.substring(start, end + 1);
     let checkParen = end + 1;
+    if (checkParen < content.length && content[checkParen] === ':') {
+        result.isTag = true;
+    }
     while (checkParen < content.length && StringHelpers.isWhitespace(content[checkParen])) checkParen++;
     if (checkParen < content.length && content[checkParen] === '(') result.isCallable = true;
     return result;
@@ -142,10 +174,51 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
     let currentFunctionStartLine = -1;
     let currentFunctionLocals: { identifier: string; line: number; col: number; len: number; isConst: boolean; label: string; }[] = [];
     let currentVarDecl: { isGlobal: boolean; isConst: boolean; isStatic: boolean; isPublic: boolean; isStock: boolean; } | null = null;
+    let inBlockComment = false;
+    let lineContentForBraces = "";
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const originalLine = lines[lineIndex];
         const trimmedLine = originalLine.trim();
+
+        // Handle multi-line block comments /* ... */
+        if (inBlockComment) {
+            if (trimmedLine.includes('*/')) {
+                inBlockComment = false;
+                const endIdx = originalLine.indexOf('*/');
+                // The part after */ should be processed
+                const afterComment = originalLine.substring(endIdx + 2);
+                lineContentForBraces = stripComments(afterComment, true);
+                const commentPart = originalLine.substring(0, endIdx).replace(/^\s*\*/, '').trim();
+                if (commentPart) docComment += commentPart + '\n';
+            } else {
+                const commentPart = originalLine.replace(/^\s*\*/, '').trim();
+                if (commentPart) docComment += commentPart + '\n';
+                continue; // Entire line is inside block comment
+            }
+        } else if (trimmedLine.startsWith('/*') && !trimmedLine.startsWith('/**')) {
+            if (!trimmedLine.includes('*/')) {
+                inBlockComment = true;
+                const commentPart = trimmedLine.substring(2).replace(/^\s*\*/, '').trim();
+                if (commentPart) docComment += commentPart + '\n';
+                continue;
+            }
+            // Single-line block comment: stripComments below will handle it
+            lineContentForBraces = stripComments(originalLine, true);
+            const startIdx = originalLine.indexOf('/*');
+            const endIdx = originalLine.indexOf('*/');
+            const commentPart = originalLine.substring(startIdx + 2, endIdx).trim();
+            if (commentPart) docComment += commentPart + '\n';
+        } else {
+            lineContentForBraces = stripComments(originalLine, true);
+            if (trimmedLine.startsWith('//')) {
+                const commentPart = trimmedLine.substring(2).trim();
+                if (commentPart) docComment += commentPart + '\n';
+            }
+        }
+
+        const lineContent = lineContentForBraces;
+        const trimmedContent = lineContent.trim();
 
         if (trimmedLine.startsWith('/**') && !trimmedLine.startsWith('/***')) {
             docComment = '';
@@ -161,16 +234,15 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
             continue;
         }
 
-        const lineContent = stripComments(trimmedLine);
-        if (!lineContent) {
-            if (!trimmedLine.includes('*/')) {
+        if (!trimmedContent) {
+            if (!trimmedLine.includes('*/') && !trimmedLine.startsWith('//') && !trimmedLine.startsWith('/*')) {
                 docComment = "";
             }
             continue;
         }
 
-        // Remove strings para não contar braces dentro delas
-        const noStrings = lineContent.replace(/"[^"]*"/g, '').replace(/'[^']*'/g, '');
+        // Remove strings to avoid counting braces inside them (handles escaped quotes)
+        const noStrings = lineContent.replace(/"(?:[^"\\]|\\.)*"/g, '').replace(/'(?:[^'\\]|\\.)*'/g, '');
         const openBraces = (noStrings.match(/{/g) || []).length;
         const closeBraces = (noStrings.match(/}/g) || []).length;
         if (bracketDepth > 0) {
@@ -190,7 +262,7 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
 
                     let declPart = lineContent;
                     if (isDeclStart) {
-                        declPart = lineContent.replace(/^\s*(?:new|static|const|stock)\s+/, '');
+                        declPart = lineContent.replace(/^\s*(?:(?:new|static|const|stock)\s+)+/, '');
                     }
 
                     if (!/^\s*(?:new|static|const|stock|\s)+$/.test(lineContent)) {
@@ -210,7 +282,14 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                         }
                         segments.push(currentSeg);
 
-                        let searchPos = 0;
+                        let searchPos = originalLine.indexOf(lineContent);
+                        if (isDeclStart) {
+                            const modMatch = lineContent.match(/^\s*(?:(?:new|static|const|stock)\s+)+/);
+                            if (modMatch) {
+                                searchPos += modMatch[0].length;
+                            }
+                        }
+
                         for (const seg of segments) {
                             const trimmedSeg = seg.trim();
                             if (!trimmedSeg) continue;
@@ -231,10 +310,16 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                                     const varCol = originalLine.indexOf(varName, searchPos);
                                     if (varCol >= 0) {
                                         searchPos = varCol + varName.length;
+                                        const prefix: string[] = [];
+                                        if (currentVarDecl!.isStatic) prefix.push('static');
+                                        if (prefix.length === 0) prefix.push('new');
+                                        if (currentVarDecl!.isConst) prefix.push('const');
+                                        
+                                        const varCleanLabel = prefix.join(' ') + ' ' + trimmedSeg.split('=')[0].trim();
                                         currentFunctionLocals.push({
                                             identifier: varName, line: lineIndex,
                                             col: varCol, len: varName.length,
-                                            isConst: currentVarDecl!.isConst, label: trimmedSeg
+                                            isConst: currentVarDecl!.isConst, label: varCleanLabel
                                         });
                                         let modifiers = 1; // declaration
                                         if (currentVarDecl!.isConst) modifiers |= 2; // readonly
@@ -274,16 +359,16 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
             continue;
         }
 
-        if (lineContent.startsWith('#include') || lineContent.startsWith('#tryinclude')) {
+        if (trimmedContent.startsWith('#include') || trimmedContent.startsWith('#tryinclude')) {
             const match = lineContent.match(/#\s*(?:try)?include\s*(?:<|")\s*(.+?)\s*(?:>|")/);
             if (match?.[1]) {
                 results.headerInclusions.push({
-                    filename: match[1], isLocal: lineContent.includes('"'), isSilent: lineContent.startsWith('#tryinclude'),
+                    filename: match[1], isLocal: lineContent.includes('"'), isSilent: trimmedContent.startsWith('#tryinclude'),
                     start: { line: lineIndex, character: 0 }, end: { line: lineIndex, character: originalLine.length }
                 });
 
                 // Semantic: #include keyword
-                const keyword = lineContent.startsWith('#tryinclude') ? '#tryinclude' : '#include';
+                const keyword = trimmedContent.startsWith('#tryinclude') ? '#tryinclude' : '#include';
                 const kwCol = originalLine.indexOf(keyword.charAt(0));
                 results.semanticTokens.push({
                     line: lineIndex, char: kwCol, length: keyword.length,
@@ -299,20 +384,21 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                     });
                 }
             }
-        } else if (lineContent.startsWith('#define')) {
+        } else if (trimmedContent.startsWith('#define')) {
             const match = lineContent.match(defineRegex);
             if (match) {
                 const [, identifier, params, value] = match;
                 if (params !== undefined) {
+                    const searchPos = originalLine.indexOf('#define') + 7;
                     results.callables.push({
                         label: lineContent, identifier, file: fileUri,
-                        start: { line: lineIndex, character: originalLine.indexOf(identifier) },
-                        end: { line: lineIndex, character: originalLine.indexOf(identifier) + identifier.length },
+                        start: { line: lineIndex, character: originalLine.indexOf(identifier, searchPos) },
+                        end: { line: lineIndex, character: originalLine.indexOf(identifier, searchPos) + identifier.length },
                         parameters: params ? params.split(',').map(p => ({ label: p.trim() })) : [],
                         documentation: `Macro: ${lineContent}`, isForward: false
                     });
                     // Semantic: macro declaration
-                    const macroCol = originalLine.indexOf(identifier);
+                    const macroCol = originalLine.indexOf(identifier, searchPos);
                     if (macroCol >= 0) {
                         results.semanticTokens.push({
                             line: lineIndex, char: macroCol, length: identifier.length,
@@ -320,12 +406,13 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                         });
                     }
                 } else {
+                    const searchPos = originalLine.indexOf('#define') + 7;
                     results.constants.push({
                         identifier, value: value.trim(), label: `#define ${identifier} ${value.trim()}`, file: fileUri,
                         range: { start: { line: lineIndex, character: 0 }, end: { line: lineIndex, character: originalLine.length } }
                     });
                     // Semantic: constant (readonly)
-                    const constCol = originalLine.indexOf(identifier);
+                    const constCol = originalLine.indexOf(identifier, searchPos);
                     if (constCol >= 0) {
                         results.semanticTokens.push({
                             line: lineIndex, char: constCol, length: identifier.length,
@@ -334,7 +421,7 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                     }
                 }
             }
-        } else if (lineContent.startsWith('enum')) {
+        } else if (trimmedContent.startsWith('enum')) {
             // Semantic: enum keyword
             results.semanticTokens.push({
                 line: lineIndex, char: originalLine.indexOf('enum'), length: 4,
@@ -418,18 +505,23 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                 const identifier = (fullIdentifier || '').split(':').pop() || '';
                 if (!identifier) continue;
 
+                let searchPos = originalLine.indexOf(lineContent);
+                if (specifier) {
+                    searchPos = originalLine.indexOf(specifier, searchPos) + specifier.length;
+                }
+                const fnCol = originalLine.indexOf(identifier, searchPos);
+
                 const newCallable: Types.CallableDescriptor = {
                     label: callableMatch[0].trim(),
                     identifier, file: fileUri,
-                    start: { line: lineIndex, character: originalLine.indexOf(identifier) },
-                    end: { line: lineIndex, character: originalLine.indexOf(identifier) + identifier.length },
+                    start: { line: lineIndex, character: fnCol },
+                    end: { line: lineIndex, character: fnCol + identifier.length },
                     parameters: params ? params.split(',').map(p => ({ label: p.trim() })) : [],
                     documentation: docComment.trim(),
                     isForward: specifier === 'forward' || specifier === 'native'
                 };
 
                 // Semantic: function declaration
-                const fnCol = originalLine.indexOf(identifier);
                 if (fnCol >= 0) {
                     let modifiers = 1; // declaration
                     if (specifier === 'static') modifiers |= 4; // static
@@ -528,7 +620,7 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
 
                     let declPart = lineContent;
                     if (isDeclStart) {
-                        declPart = lineContent.replace(/^\s*(?:new|static|const|public|stock)\s+/, '');
+                        declPart = lineContent.replace(/^\s*(?:(?:new|static|const|public|stock)\s+)+/, '');
                     }
 
                     if (!/^\s*(?:new|static|const|public|stock|\s)+$/.test(lineContent)) {
@@ -548,7 +640,14 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                         }
                         segments.push(currentSeg);
 
-                        let searchPos = 0;
+                        let searchPos = originalLine.indexOf(lineContent);
+                        if (isDeclStart) {
+                            const modMatch = lineContent.match(/^\s*(?:(?:new|static|const|public|stock)\s+)+/);
+                            if (modMatch) {
+                                searchPos += modMatch[0].length;
+                            }
+                        }
+
                         for (const seg of segments) {
                             const trimmedSeg = seg.trim();
                             if (!trimmedSeg) continue;
@@ -569,8 +668,16 @@ export function parse(fileUri: URI, content: string, skipStatic: boolean): Types
                                     const varCol = originalLine.indexOf(varName, searchPos);
                                     if (varCol >= 0) {
                                         searchPos = varCol + varName.length;
+                                        const prefix: string[] = [];
+                                        if (currentVarDecl!.isStock) prefix.push('stock');
+                                        if (currentVarDecl!.isStatic) prefix.push('static');
+                                        if (currentVarDecl!.isPublic) prefix.push('public');
+                                        if (prefix.length === 0) prefix.push('new');
+                                        if (currentVarDecl!.isConst) prefix.push('const');
+
+                                        const varCleanLabel = prefix.join(' ') + ' ' + trimmedSeg.split('=')[0].trim();
                                         results.values.push({
-                                            label: trimmedSeg, identifier: varName, isConst: currentVarDecl!.isConst, file: fileUri,
+                                            label: varCleanLabel, identifier: varName, isConst: currentVarDecl!.isConst, file: fileUri,
                                             range: { start: { line: lineIndex, character: varCol }, end: { line: lineIndex, character: varCol + varName.length } },
                                             documentation: docComment.trim()
                                         });
@@ -604,6 +711,20 @@ export function doDefinition(
     content: string, position: VSCLS.Position, data: Types.DocumentData,
     dependenciesData: Map<DM.FileDependency, Types.DocumentData>): VSCLS.Location | null {
 
+    const cursorIndex = positionToIndex(content, position);
+    const result = findIdentifierAtCursor(content, cursorIndex);
+    if (!result.identifier) return null;
+
+    const identifierLower = result.identifier.toLowerCase();
+
+    // Check local variables first (they shadow globals)
+    const localVars = data.localVariables;
+    const localVar = localVars.find(lv => lv.identifier === result.identifier && position.line >= lv.scopeStartLine && position.line <= lv.scopeEndLine);
+    if (localVar) {
+        if (position.line === localVar.range.start.line) return null;
+        return VSCLS.Location.create(localVar.file.toString(), localVar.range);
+    }
+
     const symbols = Helpers.getSymbols(data, dependenciesData);
     const line = content.split('\n')[position.line];
 
@@ -621,32 +742,31 @@ export function doDefinition(
         }
     }
 
-    const cursorIndex = positionToIndex(content, position);
-    const result = findIdentifierAtCursor(content, cursorIndex);
-    if (!result.identifier) return null;
-
-    const identifierLower = result.identifier.toLowerCase();
-
-    const constant = symbols.constants.find(c => c.identifier.toLowerCase() === identifierLower);
-    if (constant) {
-        if (position.line === constant.range.start.line) return null;
-        return VSCLS.Location.create(constant.file.toString(), constant.range);
-    }
-
     const potentialIdentifiers = [result.identifier];
     if (result.identifier.startsWith('@')) potentialIdentifiers.push(result.identifier.substring(1));
     else potentialIdentifiers.push('@' + result.identifier);
 
+    // 1. Check variables (values) first - high priority
+    const value = symbols.values.find(val => potentialIdentifiers.some(id => id.toLowerCase() === val.identifier.toLowerCase()));
+    if (value) {
+        if (data.uri === value.file.toString() && position.line === value.range.start.line) return null;
+        return VSCLS.Location.create(value.file.toString(), value.range);
+    }
+
+    // 2. Check callables
     const callable = symbols.callables.find(clb => potentialIdentifiers.some(id => id.toLowerCase() === clb.identifier.toLowerCase()));
     if (callable) {
+        if (data.uri === callable.file.toString() && position.line === callable.start.line) return null;
         return VSCLS.Location.create(callable.file.toString(), VSCLS.Range.create(callable.start, callable.end));
     }
 
-    const value = symbols.values.find(val => potentialIdentifiers.some(id => id.toLowerCase() === val.identifier.toLowerCase()));
-    if (value) {
-        if (position.line === value.range.start.line) return null;
-        return VSCLS.Location.create(value.file.toString(), value.range);
+    // 3. Check constants last
+    const constant = symbols.constants.find(c => c.identifier.toLowerCase() === identifierLower);
+    if (constant) {
+        if (data.uri === constant.file.toString() && position.line === constant.range.start.line) return null;
+        return VSCLS.Location.create(constant.file.toString(), constant.range);
     }
+
     return null;
 }
 
@@ -833,24 +953,52 @@ export function doHover(
     const cursorIndex = positionToIndex(content, position);
     const result = findIdentifierAtCursor(content, cursorIndex);
     if (!result.identifier) return null;
-    const symbols = Helpers.getSymbols(data, dependenciesData);
 
-    const constant = symbols.constants.find(c => c.identifier === result.identifier);
-    if (constant) return { contents: [{ language: 'amxxpawn', value: constant.label }] };
+    // Check local variables first (they shadow globals)
+    const localVars = data.localVariables;
+    const localVar = localVars.find(lv => lv.identifier === result.identifier && position.line >= lv.scopeStartLine && position.line <= lv.scopeEndLine);
+    if (localVar) {
+        return { contents: [{ language: 'amxxpawn', value: localVar.label }] };
+    }
+
+    const symbols = Helpers.getSymbols(data, dependenciesData);
 
     const idsToSearch = [result.identifier];
     if (result.identifier.startsWith('@')) idsToSearch.push(result.identifier.substring(1));
     else idsToSearch.push('@' + result.identifier);
 
-    const callable = symbols.callables.find(c => idsToSearch.some(id => id.toLowerCase() === c.identifier.toLowerCase()));
+    // Check if it's a tag (e.g. Float:)
+    if (result.isTag) {
+        return { contents: [{ language: 'amxxpawn', value: `(tag) ${result.identifier}:` }] };
+    }
+
+    // 1. Check variables (values) - high priority
+    let value = symbols.values.find(v => idsToSearch.some(id => id === v.identifier));
+    if (!value) {
+        value = symbols.values.find(v => idsToSearch.some(id => id.toLowerCase() === v.identifier.toLowerCase()));
+    }
+    if (value) {
+        // Skip hover if on the declaration line in the same file
+        if (data.uri === value.file.toString() && position.line === value.range.start.line) return null;
+        return { contents: [{ language: 'amxxpawn', value: value.label }, { language: 'pawndoc', value: value.documentation }] };
+    }
+
+    // 2. Check callables
+    let callable = symbols.callables.find(c => idsToSearch.some(id => id === c.identifier));
+    if (!callable) {
+        callable = symbols.callables.find(c => idsToSearch.some(id => id.toLowerCase() === c.identifier.toLowerCase()));
+    }
     if (callable) {
         return { contents: [{ language: 'amxxpawn', value: callable.label }, { language: 'pawndoc', value: callable.documentation }] };
     }
 
-    const value = symbols.values.find(v => idsToSearch.some(id => id.toLowerCase() === v.identifier.toLowerCase()));
-    if (value && position.line !== value.range.start.line) {
-        return { contents: [{ language: 'amxxpawn', value: value.label }, { language: 'pawndoc', value: value.documentation }] };
+    // 3. Check constants
+    let constant = symbols.constants.find(c => idsToSearch.some(id => id === c.identifier));
+    if (!constant) {
+        constant = symbols.constants.find(c => idsToSearch.some(id => id.toLowerCase() === c.identifier.toLowerCase()));
     }
+    if (constant) return { contents: [{ language: 'amxxpawn', value: constant.label }] };
+
     return null;
 }
 
@@ -924,58 +1072,68 @@ export function doReferences(
     const locations: VSCLS.Location[] = [];
     const identifier = result.identifier;
 
-    // Search in current document
-    findIdentifierOccurrences(content, identifier, documentUri, locations);
+    // Determine if the identifier is a callable (function/callback)
+    let isCallable = result.isCallable;
+    if (!isCallable) {
+        if (identifier.startsWith('@') || identifier.startsWith('public ')) {
+            isCallable = true;
+        } else {
+            for (const callable of data.callables) {
+                if (callable.identifier === identifier) {
+                    isCallable = true;
+                    break;
+                }
+            }
+            if (!isCallable) {
+                for (const depData of dependenciesData.values()) {
+                    for (const callable of depData.callables) {
+                        if (callable.identifier === identifier) {
+                            isCallable = true;
+                            break;
+                        }
+                    }
+                    if (isCallable) break;
+                }
+            }
+        }
+    }
 
-    // Search in dependencies using cached parsed data instead of reading from disk
-    for (const [dep, depData] of dependenciesData.entries()) {
+    // Search all occurrences in the current document
+    findIdentifierOccurrences(content, identifier, documentUri, locations, isCallable);
+
+    // Search all occurrences in dependency files (includes)
+    for (const [dep] of dependenciesData.entries()) {
         const depUri = dep.uri;
-
-        // Search in callables (function definitions)
-        for (const callable of depData.callables) {
-            if (callable.identifier === identifier) {
-                locations.push(VSCLS.Location.create(depUri, {
-                    start: callable.start,
-                    end: callable.end
-                }));
-            }
-        }
-
-        // Search in values (variables)
-        for (const value of depData.values) {
-            if (value.identifier === identifier) {
-                locations.push(VSCLS.Location.create(depUri, value.range));
-            }
-        }
-
-        // Search in constants
-        for (const constant of depData.constants) {
-            if (constant.identifier === identifier) {
-                locations.push(VSCLS.Location.create(depUri, constant.range));
-            }
-        }
-
-        // Also do a full text search in the dependency content for occurrences
-        // (for references that are not definitions, e.g., function calls)
-        // (for references that are not definitions, e.g., function calls)
         try {
             const depFsPath = URI.parse(depUri).fsPath;
             if (FS.existsSync(depFsPath)) {
                 const depContent = FS.readFileSync(depFsPath, 'utf8');
-                findIdentifierOccurrences(depContent, identifier, depUri, locations);
+                findIdentifierOccurrences(depContent, identifier, depUri, locations, isCallable);
             }
         } catch (e) {
-            // ignore
+            // ignore read errors
         }
     }
 
-    return locations;
+    // Deduplicate locations by URI + start position
+    const seen = new Set<string>();
+    const unique: VSCLS.Location[] = [];
+    for (const loc of locations) {
+        const key = `${loc.uri}:${loc.range.start.line}:${loc.range.start.character}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(loc);
+        }
+    }
+
+    return unique;
 }
 
-function findIdentifierOccurrences(content: string, identifier: string, uri: string, locations: VSCLS.Location[]) {
+
+function findIdentifierOccurrences(content: string, identifier: string, uri: string, locations: VSCLS.Location[], searchInStrings: boolean = false) {
     const lines = content.split(/\r?\n/);
     const escapedId = identifier.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
-    const regex = new RegExp(`\\\\b${escapedId}\\\\b`, 'g');
+    const regex = new RegExp(`(?<![a-zA-Z0-9_@])${escapedId}(?![a-zA-Z0-9_@])`, 'g');
     
     let inBlockComment = false;
     for (let i = 0; i < lines.length; i++) {
@@ -1004,8 +1162,13 @@ function findIdentifierOccurrences(content: string, identifier: string, uri: str
         }
 
         let cleanLine = line.replace(/\/\/.*/, match => ' '.repeat(match.length));
-        cleanLine = cleanLine.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, match => ' '.repeat(match.length));
-        cleanLine = cleanLine.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, match => ' '.repeat(match.length));
+        
+        // Only strip strings if we are NOT searching for a callable/callback.
+        // Pawn heavily uses string-based callbacks (e.g. set_task(1.0, "@MyTask")).
+        if (!searchInStrings) {
+            cleanLine = cleanLine.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, match => ' '.repeat(match.length));
+            cleanLine = cleanLine.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, match => ' '.repeat(match.length));
+        }
 
         let match;
         while ((match = regex.exec(cleanLine)) !== null) {
@@ -1027,9 +1190,16 @@ export function getUsageTokens(
     
     const symbolMap = new Map<string, { type: number, modifier: number }>();
     
+    // Build a set of value identifiers for priority resolution:
+    // 'new const' variables go into values (type 2), NOT constants (type 3)
+    const valueIdentifiers = new Set<string>();
+    for (const v of symbols.values) valueIdentifiers.add(v.identifier);
+
     for (const c of symbols.callables) symbolMap.set(c.identifier, { type: 0, modifier: 0 });
-    for (const v of symbols.values) symbolMap.set(v.identifier, { type: 2, modifier: v.isConst ? 2 : 0 });
     for (const c of symbols.constants) {
+        // Skip constants that also exist as values — values take priority
+        // This prevents 'new const' variables from being classified as enumMember
+        if (valueIdentifiers.has(c.identifier)) continue;
         if (c.label.startsWith('#define')) {
             symbolMap.set(c.identifier, { type: 1, modifier: 1 }); // macro, readonly
         } else if (c.label.startsWith('enum')) {
@@ -1038,6 +1208,8 @@ export function getUsageTokens(
             symbolMap.set(c.identifier, { type: 2, modifier: 1 }); // variable, readonly
         }
     }
+    // Values MUST be set last to ensure they always win over constants
+    for (const v of symbols.values) symbolMap.set(v.identifier, { type: 2, modifier: v.isConst ? 2 : 0 });
 
     const lines = content.split('\n');
     let inBlockComment = false;
@@ -1168,10 +1340,24 @@ export function doRename(
     const escapedId = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const lines = content.split(/\r?\n/);
 
+    let inBlockComment = false;
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
         const trimmed = line.trim();
-        if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
+
+        if (inBlockComment) {
+            if (trimmed.includes('*/')) {
+                inBlockComment = false;
+            }
+            continue;
+        }
+        if (trimmed.startsWith('//')) continue;
+        if (trimmed.startsWith('/*')) {
+            if (!trimmed.includes('*/')) {
+                inBlockComment = true;
+            }
+            continue;
+        }
 
         const noStrings = line.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
 

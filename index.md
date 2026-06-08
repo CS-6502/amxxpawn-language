@@ -34,6 +34,47 @@ This project revives and modernizes the development experience for **AMX Mod X**
 
 It transforms VS Code into a powerful IDE for Pawn, bringing features that were previously exclusive to newer languages.
 
+## ✨ What's New (v1.5.1)
+### Fixed
+- **Includes Inside Preprocessor Blocks**: Diretivas `#include` indentadas agora são corretamente reconhecidas.
+- **Find All References**: Corrigido o bug onde `Shift+F12` exibia definições em duplicidade.
+- **Find All References dentro de Strings (Callbacks)**: Chamadas de funções e callbacks escritas em forma de string (ex: `set_task(4.0, "@ClearResults")`) agora são perfeitamente reconhecidas e listadas no "Find All References", respeitando o comportamento típico do Pawn. Também foi adicionado o suporte adequado para funções prefixadas com `@`.
+- *Fixed parsing of indented `#include` directives, corrected "Find All References" duplicate definition results, and added proper search capability for isolated identifiers (like callbacks) inside strings and special prefixed symbols (@).*
+
+---
+
+## ✨ What's New (v1.5.0)
+### Added
+- **Linux Support**: Adicionado suporte para sistemas Linux.
+- *Added support for Linux systems.*
+- **Official Compiler Download URL**: Alterada a URL de download automático do compilador para a URL oficial de releases do AmxModX no GitHub.
+- *Switch to official AmxModX github release URL for auto compiler download.*
+
+---
+
+## ✨ What's New (v1.4.0)
+### Added
+- **Local Variable Hover & Definition**: Agora o "Go to Definition" (Ctrl+Click) e o Hover funcionam para variáveis locais e parâmetros dentro do corpo das funções.
+- *Support for "Go to Definition" and Hover tooltips for local variables and parameters inside function bodies.*
+
+### Fixed
+- **Block Comment Parsing**: Corrigido um bug crítico onde chaves `{}` dentro de comentários em bloco `/* */` quebravam o rastreamento de escopo do parser.
+- **Robust Comment Stripping**: O parser agora remove corretamente comentários em bloco de linha única e lida melhor com caracteres escapados.
+- **Go to Definition URI Parity**: Corrigido o bug onde o "Go to Definition" poderia falhar em arquivos diferentes na mesma linha.
+- **Highlighting Priority (new const)**: Resolvido o conflito de classificação de variáveis `new const` no realce semântico.
+- *Fixed block comment brace tracking, improved comment stripping, and resolved symbol resolution line-collisions.*
+
+---
+
+## ✨ What's New (v1.3.2)
+### Fixed
+- **Single-character Identifiers**: O parser agora identifica corretamente funções e variáveis com apenas uma letra (ex: `new n;`, `public p(){}`).
+- **Compound Variable Modifiers**: Corrigido o erro onde variáveis com múltiplos modificadores (ex: `new const TEST_ARR`) não eram corretamente reconhecidas.
+- *Fixed the parser to correctly identify single-character names and variables with compound modifiers like `new const`.*
+
+---
+
+
 ## ✨ What's New (v1.3.1)
 ### Fixed
 - **Multi-line Variable Parsing**: Corrigido o parser para identificar corretamente variáveis declaradas em múltiplas linhas (ex: `new a, \n b, \n c;`) ou quando os modificadores estão em uma linha e os identificadores em outra (ex: `public stock const \n PluginName[]`).
